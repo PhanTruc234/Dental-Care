@@ -31,4 +31,5 @@ export const env = {
     APP_NAME: process.env.APP_NAME || "DentalCare",
     CLIENT_URLS: resolvedClientUrls,
     CLIENT_URL: appUrl,
+    DATABASE_URL: process.env.DATABASE_URL,
 };

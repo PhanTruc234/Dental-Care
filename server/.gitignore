@@ -26,3 +26,5 @@ pnpm-debug.log*
 .idea/
 .DS_Store
 Thumbs.db
+
+/src/generated/prisma
