@@ -1,8 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -10,4 +5,719 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  DENTIST
+  RECEPTIONIST
+  ASSISTANT
+  PATIENT
+}
+
+enum AuthProvider {
+  LOCAL
+  GOOGLE
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum StaffStatus {
+  ACTIVE
+  INACTIVE
+  ON_LEAVE
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  ABSENT
+}
+
+enum PayrollStatus {
+  DRAFT // mới tính, chưa chốt
+  CONFIRMED
+  PAID
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PARTIALLY_PAID // tổng Payment < finalAmount
+  PAID
+  CANCELLED
+}
+
+enum StockTransactionType {
+  IMPORT
+  EXPORT
+  ADJUSTMENT // kiểm kê lệch, hủy thuốc hết hạn
+}
+
+enum InvoiceItemType {
+  SERVICE
+  MEDICINE
+}
+
+enum PaymentMethod {
+  CASH
+  TRANSFER
+  CARD
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CHECKED_IN // bệnh nhân đã đến, đang chờ khám
+  COMPLETED
+  CANCELLED
+  NO_SHOW // bệnh nhân không đến
+}
+
+enum MedicineUnit {
+  TABLET // viên
+  CAPSULE // viên nang
+  BOTTLE // chai
+  TUBE // tuýp
+  BOX // hộp
+  PACK // gói
+}
+
+enum Relationship {
+  SELF
+  FATHER
+  MOTHER
+  SPOUSE
+  CHILD
+  RELATIVE
+  OTHER
+}
+
+enum AttachmentType {
+  XRAY
+  PHOTO
+  PDF
+  OTHER
+}
+
+enum Shift {
+  MORNING
+  AFTERNOON
+  EVENING
+}
+
+// ================= AUTH =================
+
+model User {
+  userId        String       @id @default(uuid()) @map("user_id") @db.Uuid
+  email         String       @unique @db.Text // lowercase ở service trước khi lưu
+  passwordHash  String?      @map("password_hash") @db.Text // null với user đăng nhập Google
+  authProvider  AuthProvider @default(LOCAL) @map("auth_provider")
+  providerId    String?      @map("provider_id") @db.Text // Google "sub" ID
+  emailVerified Boolean      @default(false) @map("email_verified")
+  role          Role
+  isActive      Boolean      @default(true) @map("is_active")
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt     DateTime?    @map("deleted_at") @db.Timestamptz(6)
+
+  staff         Staff?
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
+  patient       Patient?
+
+  @@unique([authProvider, providerId], map: "uq_users_provider") // 1 tài khoản Google chỉ map 1 user
+  @@index([role, isActive])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.Text // lưu HASH, không lưu token gốc
+  userAgent String?   @map("user_agent")
+  ip        String?
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6) //  null nghĩa là đã logout / bị thu hồi
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ================= NHÂN SỰ =================
+
+model Staff {
+  staffId      String    @id @default(uuid()) @map("staff_id") @db.Uuid
+  userId       String    @unique @map("user_id") @db.Uuid
+  employeeCode String    @unique @map("employee_code") // mã hiển thị: NV001
+  citizenId    String?   @unique
+  fullName     String    @map("full_name")
+  phone        String    @unique
+  avatar       String?
+  gender       Gender
+  dob          DateTime? @db.Date
+  address      String?
+
+  status       StaffStatus @default(ACTIVE)
+  hireDate     DateTime?   @map("hire_date") @db.Date
+  terminatedAt DateTime?   @map("terminated_at") @db.Date
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user                  User               @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  staffSpecialties      StaffSpecialty[]
+  salaries              Salary[]
+  attendances           Attendance[]
+  payrolls              Payroll[]          @relation("PayrollStaff")
+  approvedPayrolls      Payroll[]          @relation("PayrollApprover")
+  treatmentRecords      TreatmentRecord[]
+  invoicesCreated       Invoice[]
+  paymentsReceived      Payment[]
+  stockTransactions     StockTransaction[]
+  appointmentsAsDentist Appointment[]      @relation("AppointmentDentist")
+  appointmentsCreated   Appointment[]      @relation("AppointmentCreator")
+  appointmentsCancelled Appointment[]      @relation("AppointmentCanceller")
+  staffSchedules        StaffSchedule[]
+  appointments          Appointment[]
+
+  @@index([fullName])
+  @@map("staff")
+}
+
+model Specialty {
+  specialtyId String @id @default(uuid()) @map("specialty_id") @db.Uuid
+  name        String @unique
+
+  staffs StaffSpecialty[]
+
+  @@map("specialties")
+}
+
+model StaffSpecialty {
+  staffId     String @map("staff_id") @db.Uuid
+  specialtyId String @map("specialty_id") @db.Uuid
+
+  staff     Staff     @relation(fields: [staffId], references: [staffId], onDelete: Cascade)
+  specialty Specialty @relation(fields: [specialtyId], references: [specialtyId], onDelete: Cascade)
+
+  @@id([staffId, specialtyId])
+  @@index([specialtyId])
+  @@map("staff_specialties")
+}
+
+// ================= LƯƠNG =================
+
+model Salary {
+  salaryId String @id @default(uuid()) @map("salary_id") @db.Uuid
+
+  staffId String @map("staff_id") @db.Uuid
+  staff   Staff  @relation(fields: [staffId], references: [staffId], onDelete: Cascade)
+
+  baseSalary    Decimal  @map("base_salary") @db.Decimal(12, 2)
+  effectiveFrom DateTime @map("effective_from") @db.Date // tăng lương = thêm dòng mới, không sửa dòng cũ
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([staffId, effectiveFrom])
+  @@map("salaries")
+}
+
+model Attendance {
+  attendanceId String @id @default(uuid()) @map("attendance_id") @db.Uuid
+
+  staffId    String @map("staff_id") @db.Uuid
+  staff      Staff  @relation(fields: [staffId], references: [staffId], onDelete: Cascade)
+  scheduleId String @unique @map("schedule_id") @db.Uuid
+
+  checkIn  DateTime? @map("check_in") @db.Timestamptz(6)
+  checkOut DateTime? @map("check_out") @db.Timestamptz(6)
+
+  lateMinutes Int @default(0) @map("late_minutes") // dùng tính phạt đi trễ
+
+  status    AttendanceStatus
+  note      String?
+  schedule  StaffSchedule    @relation(fields: [scheduleId], references: [scheduleId], onDelete: Cascade)
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([staffId])
+  @@map("attendances")
+}
+
+model StaffSchedule {
+  scheduleId String @id @default(uuid()) @map("schedule_id") @db.Uuid
+
+  staffId String @map("staff_id") @db.Uuid
+
+  workDate DateTime @map("work_date") @db.Date
+
+  shift Shift
+
+  startTime DateTime @map("start_time") @db.Timestamptz(6)
+  endTime   DateTime @map("end_time") @db.Timestamptz(6)
+
+  isWorking Boolean @default(true) @map("is_working")
+
+  note String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  staff Staff @relation(fields: [staffId], references: [staffId], onDelete: Cascade)
+
+  attendance   Attendance?
+  appointments Appointment[]
+
+  @@unique([staffId, workDate, shift])
+  @@index([workDate])
+  @@index([staffId, workDate])
+  @@map("staff_schedules")
+}
+
+model Payroll {
+  payrollId String @id @default(uuid()) @map("payroll_id") @db.Uuid
+
+  staffId String @map("staff_id") @db.Uuid
+  staff   Staff  @relation("PayrollStaff", fields: [staffId], references: [staffId], onDelete: Cascade)
+
+  month Int // 1-12, validate ở service (Prisma không có CHECK)
+  year  Int
+
+  baseSalary Decimal @map("base_salary") @db.Decimal(12, 2) // SNAPSHOT lương tại kỳ này - tăng lương sau không làm sai kỳ cũ
+
+  commission Decimal @default(0) @db.Decimal(12, 2) // tính từ TreatmentItem của bác sĩ x commissionRate
+  bonus      Decimal @default(0) @db.Decimal(12, 2)
+  penalty    Decimal @default(0) @db.Decimal(12, 2)
+
+  totalSalary Decimal @map("total_salary") @db.Decimal(12, 2) // = base + commission + bonus - penalty
+
+  status PayrollStatus @default(DRAFT)
+
+  approvedById String? @map("approved_by_id") @db.Uuid
+  approvedBy   Staff?  @relation("PayrollApprover", fields: [approvedById], references: [staffId])
+
+  paidAt DateTime? @map("paid_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([staffId, month, year]) // chặn tính lương 2 lần cùng kỳ
+  @@index([approvedById])
+  @@index([year, month])
+  @@map("payrolls")
+}
+
+// ================= BỆNH NHÂN =================
+
+model Patient {
+  patientId   String    @id @default(uuid()) @map("patient_id") @db.Uuid
+  patientCode String    @unique @map("patient_code")
+  userId      String?   @unique @map("user_id") @db.Uuid
+  fullName    String    @map("full_name")
+  citizenId   String?   @unique @map("citizen_id")
+  phone       String
+  gender      Gender
+  dob         DateTime? @db.Date
+  address     String?
+  allergy     String? // dị ứng thuốc - kiểm tra khi kê đơn
+  note        String? // bệnh nền, tiền sử
+
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt        DateTime?         @map("deleted_at") @db.Timestamptz(6) // hồ sơ y tế không xóa cứng
+  user             User?             @relation(fields: [userId], references: [userId], onDelete: SetNull)
+  treatmentRecords TreatmentRecord[]
+  appointments     Appointment[]
+  invoices         Invoice[]
+
+  @@index([fullName])
+  @@index([phone])
+  @@map("patients")
+}
+
+// ================= DỊCH VỤ =================
+
+model ServiceCategory {
+  serviceCategoryId String  @id @default(uuid()) @map("service_category_id") @db.Uuid
+  name              String  @unique
+  description       String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  services Service[]
+
+  @@map("service_categories")
+}
+
+model Service {
+  serviceId         String @id @default(uuid()) @map("service_id") @db.Uuid
+  serviceCategoryId String @map("service_category_id") @db.Uuid
+
+  code        String  @unique
+  name        String
+  description String?
+
+  price          Decimal @db.Decimal(12, 2) // giá niêm yết hiện tại (giá chốt nằm ở snapshot của TreatmentItem/InvoiceItem)
+  duration       Int // phút - phục vụ xếp lịch
+  commissionRate Decimal @default(0) @map("commission_rate") @db.Decimal(5, 4) // vd 0.05 = 5%
+
+  isActive Boolean @default(true) @map("is_active") // ngừng cung cấp thì tắt, không xóa (hóa đơn cũ còn tham chiếu)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  category ServiceCategory @relation(fields: [serviceCategoryId], references: [serviceCategoryId])
+
+  treatmentItems TreatmentItem[]
+  invoiceItems   InvoiceItem[]
+  appointments   Appointment[]
+
+  @@index([name])
+  @@index([serviceCategoryId])
+  @@map("services")
+}
+
+// ================= THUỐC =================
+
+model Medicine {
+  medicineId String @id @default(uuid()) @map("medicine_id") @db.Uuid
+
+  code           String       @unique
+  name           String
+  unit           MedicineUnit
+  manufacturerId String?      @map("manufacturer_id") @db.Uuid
+  sellingPrice   Decimal      @map("selling_price") @db.Decimal(12, 2) // giá bán hiện tại cho 1 đơn vị
+  minStock       Int          @default(0) @map("min_stock") // ngưỡng cảnh báo sắp hết hàng
+
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  manufacturer      Manufacturer?      @relation(fields: [manufacturerId], references: [manufacturerId])
+  batches           MedicineBatch[]
+  prescriptions     Prescription[]
+  invoiceItems      InvoiceItem[]
+  stockTransactions StockTransaction[]
+
+  @@index([name])
+  @@index([manufacturerId])
+  @@map("medicines")
+}
+
+model Manufacturer {
+  manufacturerId String @id @default(uuid()) @map("manufacturer_id") @db.Uuid
+
+  name     String  @unique
+  country  String?
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  medicines Medicine[]
+
+  @@map("manufacturers")
+}
+
+model MedicalAttachment {
+  attachmentId String @id @default(uuid()) @map("attachment_id") @db.Uuid
+
+  treatmentRecordId String @map("treatment_record_id") @db.Uuid
+
+  type AttachmentType
+
+  fileName String @map("file_name")
+  fileUrl  String @map("file_url")
+
+  uploadedAt DateTime @default(now()) @map("uploaded_at") @db.Timestamptz(6)
+
+  treatmentRecord TreatmentRecord @relation(fields: [treatmentRecordId], references: [treatmentRecordId], onDelete: Cascade)
+
+  @@index([treatmentRecordId])
+  @@map("medical_attachments")
+}
+
+// Thuốc quản lý theo LÔ vì mỗi lô có hạn dùng khác nhau
+model MedicineBatch {
+  batchId    String @id @default(uuid()) @map("batch_id") @db.Uuid
+  medicineId String @map("medicine_id") @db.Uuid
+
+  lotNumber  String   @map("lot_number") // số lô nhà sản xuất in trên hộp
+  expiryDate DateTime @map("expiry_date") @db.Date // xuất kho ưu tiên lô gần hết hạn (FEFO)
+
+  quantityIn        Int     @map("quantity_in") // số lượng nhập ban đầu của lô
+  quantityRemaining Int     @map("quantity_remaining") // trừ dần khi bán/kê đơn
+  costPrice         Decimal @map("cost_price") @db.Decimal(12, 2) // giá nhập 1 đơn vị của lô này
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  medicine          Medicine           @relation(fields: [medicineId], references: [medicineId])
+  stockTransactions StockTransaction[]
+
+  @@unique([medicineId, lotNumber])
+  @@index([expiryDate])
+  @@map("medicine_batches")
+}
+
+// Nhật ký nhập/xuất kho - mọi thay đổi tồn kho đều có vết
+model StockTransaction {
+  stockTransactionId String @id @default(uuid()) @map("stock_transaction_id") @db.Uuid
+
+  type       StockTransactionType
+  medicineId String               @map("medicine_id") @db.Uuid
+  batchId    String?              @map("batch_id") @db.Uuid // null khi ADJUSTMENT tổng thể
+
+  quantity Int // luôn dương, hướng nhập/xuất do type quyết định
+  reason   String?
+
+  createdById String? @map("created_by_id") @db.Uuid
+  createdBy   Staff?  @relation(fields: [createdById], references: [staffId])
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  medicine Medicine       @relation(fields: [medicineId], references: [medicineId])
+  batch    MedicineBatch? @relation(fields: [batchId], references: [batchId])
+
+  @@index([medicineId, createdAt])
+  @@index([batchId])
+  @@index([createdById])
+  @@map("stock_transactions")
+}
+
+// ================= ĐIỀU TRỊ =================
+
+model TreatmentRecord {
+  treatmentRecordId String @id @default(uuid()) @map("treatment_record_id") @db.Uuid
+
+  patientId     String  @map("patient_id") @db.Uuid
+  dentistId     String  @map("dentist_id") @db.Uuid
+  appointmentId String? @unique @map("appointment_id") @db.Uuid // null khi khám vãng lai không đặt lịch
+
+  diagnosis     String?
+  treatmentPlan String? @map("treatment_plan")
+  note          String?
+
+  treatedAt DateTime @default(now()) @map("treated_at") @db.Timestamptz(6) // thời điểm điều trị thực tế (khác createdAt)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  patient Patient @relation(fields: [patientId], references: [patientId])
+  dentist Staff   @relation(fields: [dentistId], references: [staffId])
+
+  treatmentItems     TreatmentItem[]
+  prescriptions      Prescription[]
+  invoice            Invoice?
+  appointment        Appointment?        @relation(fields: [appointmentId], references: [appointmentId])
+  medicalAttachments MedicalAttachment[]
+
+  @@index([patientId])
+  @@index([dentistId, treatedAt])
+  @@map("treatment_records")
+}
+
+model TreatmentItem {
+  treatmentItemId   String          @id @default(uuid()) @map("treatment_item_id") @db.Uuid
+  treatmentRecordId String          @map("treatment_record_id") @db.Uuid
+  serviceId         String          @map("service_id") @db.Uuid
+  serviceName       String          @map("service_name")
+  serviceCode       String          @map("service_code")
+  quantity          Int             @default(1) // vd nhổ 2 răng = quantity 2
+  unitPrice         Decimal         @map("unit_price") @db.Decimal(12, 2) // SNAPSHOT giá lúc điều trị
+  commissionRate    Decimal         @map("commission_rate") @db.Decimal(5, 4) // SNAPSHOT tỉ lệ hoa hồng lúc điều trị
+  treatmentRecord   TreatmentRecord @relation(fields: [treatmentRecordId], references: [treatmentRecordId], onDelete: Cascade)
+  service           Service         @relation(fields: [serviceId], references: [serviceId])
+
+  @@index([treatmentRecordId])
+  @@index([serviceId])
+  @@map("treatment_items")
+}
+
+model Prescription {
+  prescriptionId    String @id @default(uuid()) @map("prescription_id") @db.Uuid
+  treatmentRecordId String @map("treatment_record_id") @db.Uuid
+
+  medicineId   String  @map("medicine_id") @db.Uuid
+  quantity     Int
+  unitPrice    Decimal @map("unit_price") @db.Decimal(12, 2) // SNAPSHOT giá bán lúc kê
+  medicineName String  @map("medicine_name")
+  medicineCode String  @map("medicine_code")
+  dosage       String // liều dùng: "2 viên/lần"
+  instruction  String? // hướng dẫn: "uống sau ăn, sáng và tối"
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  treatmentRecord TreatmentRecord @relation(fields: [treatmentRecordId], references: [treatmentRecordId], onDelete: Cascade)
+  medicine        Medicine        @relation(fields: [medicineId], references: [medicineId])
+
+  @@index([treatmentRecordId])
+  @@index([medicineId])
+  @@map("prescriptions")
+}
+
+// ================= HÓA ĐƠN =================
+
+model Invoice {
+  invoiceId String @id @default(uuid()) @map("invoice_id") @db.Uuid
+
+  invoiceNo         String  @unique @map("invoice_no") // số hóa đơn người đọc được: "HD-2026-00001"
+  patientId         String  @map("patient_id") @db.Uuid
+  patient           Patient @relation(fields: [patientId], references: [patientId])
+  treatmentRecordId String? @unique @map("treatment_record_id") @db.Uuid // null khi bán thuốc lẻ không qua khám
+
+  totalAmount Decimal @map("total_amount") @db.Decimal(12, 2) // = sum(subtotal các dòng)
+  discount    Decimal @default(0) @db.Decimal(12, 2)
+  finalAmount Decimal @map("final_amount") @db.Decimal(12, 2) // = totalAmount - discount
+
+  status InvoiceStatus @default(UNPAID) // cập nhật theo tổng Payment
+
+  createdById String? @map("created_by_id") @db.Uuid
+  createdBy   Staff?  @relation(fields: [createdById], references: [staffId])
+
+  issuedAt DateTime @default(now()) @map("issued_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // không cascade delete - chứng từ tiền không xóa theo hồ sơ điều trị
+  treatmentRecord TreatmentRecord? @relation(fields: [treatmentRecordId], references: [treatmentRecordId])
+
+  invoiceItems InvoiceItem[]
+  payments     Payment[]
+
+  @@index([status, issuedAt])
+  @@index([patientId])
+  @@index([createdById])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  invoiceItemId String @id @default(uuid()) @map("invoice_item_id") @db.Uuid
+  invoiceId     String @map("invoice_id") @db.Uuid
+
+  itemType     InvoiceItemType @map("item_type")
+  serviceName  String?         @map("service_name")
+  serviceCode  String?         @map("service_code")
+  medicineName String?         @map("medicine_name") // đúng 1 trong 2 cột non-null theo itemType - thêm CHECK constraint trong migration SQL
+  medicineCode String?         @map("medicine_code")
+  serviceId    String?         @map("service_id") @db.Uuid
+  medicineId   String?         @map("medicine_id") @db.Uuid
+
+  quantity  Int     @default(1)
+  unitPrice Decimal @map("unit_price") @db.Decimal(12, 2) // SNAPSHOT đơn giá lúc bán
+  subtotal  Decimal @db.Decimal(12, 2) // = quantity x unitPrice
+
+  invoice  Invoice   @relation(fields: [invoiceId], references: [invoiceId])
+  service  Service?  @relation(fields: [serviceId], references: [serviceId])
+  medicine Medicine? @relation(fields: [medicineId], references: [medicineId])
+
+  @@index([invoiceId])
+  @@index([serviceId])
+  @@index([medicineId])
+  @@map("invoice_items")
+}
+
+model Appointment {
+  appointmentId String @id @default(uuid()) @map("appointment_id") @db.Uuid
+
+  patientId     String        @map("patient_id") @db.Uuid
+  scheduleId    String        @map("schedule_id") @db.Uuid
+  bookerName    String?       @map("booker_name")
+  bookerPhone   String?       @map("booker_phone")
+  bookerEmail   String?       @map("booker_email")
+  relationship  Relationship? @map("relationship")
+  dentistId     String        @map("dentist_id") @db.Uuid
+  createdById   String?       @map("created_by_id") @db.Uuid // null nếu sau này bệnh nhân tự đặt online
+  cancelledById String?       @db.Uuid
+  createdBy     Staff?        @relation("AppointmentCreator", fields: [createdById], references: [staffId])
+  cancelledBy   Staff?        @relation("AppointmentCanceller", fields: [cancelledById], references: [staffId])
+  serviceId     String?       @map("service_id") @db.Uuid // null khi chưa biết làm dịch vụ gì (khám tổng quát)
+  scheduledAt   DateTime      @map("scheduled_at") @db.Timestamptz(6)
+  checkedInAt   DateTime?     @map("checked_in_at") @db.Timestamptz(6)
+
+  completedAt  DateTime?         @map("completed_at") @db.Timestamptz(6)
+  duration     Int               @default(30) // phút - lấy từ Service.duration, dùng check trùng lịch
+  status       AppointmentStatus @default(PENDING)
+  note         String? // triệu chứng bệnh nhân mô tả khi đặt
+  cancelReason String?           @map("cancel_reason")
+  createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  cancelledAt  DateTime?         @map("cancelled_at")
+  patient      Patient           @relation(fields: [patientId], references: [patientId])
+  dentist      Staff             @relation("AppointmentDentist", fields: [dentistId], references: [staffId])
+  service      Service?          @relation(fields: [serviceId], references: [serviceId])
+
+  treatmentRecord TreatmentRecord?
+  schedule        StaffSchedule    @relation(fields: [scheduleId], references: [scheduleId])
+  staff           Staff?           @relation(fields: [staffStaffId], references: [staffId])
+  staffStaffId    String?          @db.Uuid
+
+  @@index([scheduleId])
+  @@index([dentistId, scheduledAt])
+  @@index([patientId])
+  @@index([serviceId])
+  @@index([createdById])
+  @@index([status, scheduledAt])
+  @@map("appointments")
+}
+
+model AuditLog {
+  auditLogId String @id @default(uuid()) @map("audit_log_id") @db.Uuid
+
+  userId String? @map("user_id") @db.Uuid // null với hành động của hệ thống (cron, migration)
+  user   User?   @relation(fields: [userId], references: [userId], onDelete: SetNull) // user bị xóa vẫn giữ log
+
+  action   String // "CREATE", "UPDATE", "LOGIN", "PAYMENT_RECEIVED"...
+  entity   String // tên bảng bị tác động: "Invoice", "Patient"...
+  entityId String? @map("entity_id")
+
+  oldValue Json? @map("old_value") // dữ liệu TRƯỚC khi sửa
+  newValue Json? @map("new_value") // dữ liệu SAU khi sửa
+
+  ip        String?
+  userAgent String? @map("user_agent")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  // không có updatedAt - log chỉ ghi thêm, không sửa/xóa
+
+  @@index([entity, entityId])
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// Từng lần khách trả tiền - 1 hóa đơn có thể trả nhiều lần
+model Payment {
+  paymentId String @id @default(uuid()) @map("payment_id") @db.Uuid
+  invoiceId String @map("invoice_id") @db.Uuid
+
+  amount Decimal       @db.Decimal(12, 2)
+  method PaymentMethod
+
+  receivedById String? @map("received_by_id") @db.Uuid
+  receivedBy   Staff?  @relation(fields: [receivedById], references: [staffId])
+
+  paidAt DateTime @default(now()) @map("paid_at") @db.Timestamptz(6)
+
+  note String? // vd "trả trước 50%", mã giao dịch chuyển khoản
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  invoice Invoice @relation(fields: [invoiceId], references: [invoiceId])
+
+  @@index([invoiceId])
+  @@index([receivedById])
+  @@index([paidAt])
+  @@map("payments")
 }
