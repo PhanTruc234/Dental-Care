@@ -4,14 +4,12 @@ import {
   notFoundHandler,
 } from "./shared/middlewares/errorHandler.js";
 import { httpLogger } from "./shared/middlewares/httpLogger.js";
-import helmet from "helmet";
-import cors from "cors";
+import { configureSecurity } from "./shared/configs/security.js";
 
 const app = express();
 app.use(httpLogger);
-app.use(helmet());
-app.use(cors());
-app.use(express.json());
+configureSecurity(app);
+app.use(express.json({ limit: '50kb' }));
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", uptime: process.uptime() });
 });

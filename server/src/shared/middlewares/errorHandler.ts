@@ -12,12 +12,7 @@ interface ErrorResponse {
     stack?: string;
     rawMessage?: string;
 }
-export const globalErrorHandler: ErrorRequestHandler = (
-    err,
-    req,
-    res,
-    _next,
-) => {
+export const globalErrorHandler: ErrorRequestHandler = (err, req, res, _next,) => {
     let error = err;
     if (err?.name === "JsonWebTokenError") {
         error = handleJWTError();

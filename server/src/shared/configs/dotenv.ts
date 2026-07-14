@@ -4,13 +4,6 @@ import type { SignOptions } from "jsonwebtoken";
 dotenv.config();
 type ExpiresIn = SignOptions["expiresIn"];
 
-const DEFAULT_CLIENT_URLS = ["http://localhost:5173"];
-
-const normalizeUrl = (url: string): string => url.trim().replace(/\/$/, "");
-const clientUrls = (process.env.CLIENT_URL ?? "").split(",").map(normalizeUrl).filter(Boolean);
-const resolvedClientUrls = clientUrls.length ? clientUrls : DEFAULT_CLIENT_URLS;
-const appUrl = normalizeUrl(process.env.APP_URL ?? "") || resolvedClientUrls[0]!;
-
 export const env = {
     NODE_ENV: process.env.NODE_ENV || "development",
     PORT: process.env.PORT || "3000",
@@ -29,7 +22,7 @@ export const env = {
     SMTP_FROM: process.env.SMTP_FROM || "",
     SUPPORT_EMAIL: process.env.SUPPORT_EMAIL || process.env.SMTP_USER || "",
     APP_NAME: process.env.APP_NAME || "DentalCare",
-    CLIENT_URLS: resolvedClientUrls,
-    CLIENT_URL: appUrl,
+    CLIENT_URL: process.env.CLIENT_URL || "http://localhost:5173,http://localhost:3000",
+    APP_URL: process.env.APP_URL || "http://localhost:5173",
     DATABASE_URL: process.env.DATABASE_URL,
 };
