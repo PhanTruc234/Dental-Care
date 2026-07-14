@@ -1,4 +1,4 @@
-export type Role = "admin" | "dentist" | "patient";
+export type Role = "admin" | "dentist" | "patient" | "receptionist" | "assistant";
 
 export interface TokenPayload {
     id: string;
