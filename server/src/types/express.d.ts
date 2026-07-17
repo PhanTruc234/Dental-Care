@@ -1,9 +1,9 @@
-import { TokenPayload } from "../shared/types/auth.types.ts";
+import { AccessTokenPayload } from "../shared/types/auth.types.ts";
 
 declare global {
     namespace Express {
         interface Request {
-            user?: TokenPayload
+            user?: AccessTokenPayload
         }
     }
 }

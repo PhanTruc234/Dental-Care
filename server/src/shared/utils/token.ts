@@ -4,6 +4,7 @@ import { env } from "../configs/dotenv.js"
 import { TokenPayload } from "../types/auth.types.js"
 import { COOKIE_DEFAULTS } from "../constants/cookie.js";
 import { Response } from "express";
+import { expiresIn } from "./time.js";
 
 const DEFAULT_MAX_AGE = 86400000;
 const MULTIPLIERS = { ms: 1, s: 1000, m: 60000, h: 3600000, d: 86400000 } as const;
@@ -18,7 +19,7 @@ function parseDuration(expiresIn: SignOptions["expiresIn"]): number {
     const unit = match[2] as Unit;
     return value * MULTIPLIERS[unit];
 }
-export const generateAccessToken = (payload: TokenPayload) => {
+export const generateAccessToken = (payload: TokenPayload & { sid: string }) => {
     return jwt.sign(payload, env.JWT_SECRET, { expiresIn: env.JWT_EXPIRES_IN })
 }
 export const generateRefreshToken = (payload: TokenPayload) => {
@@ -55,3 +56,6 @@ export const clearAuthCookies = (res: Response) => {
     res.clearCookie("accessToken", COOKIE_DEFAULTS);
     res.clearCookie("refreshToken", COOKIE_DEFAULTS);
 };
+
+export const refreshTokenExpiry = (): Date =>
+    expiresIn(parseDuration(env.REFRESH_TOKEN_EXPIRES_IN));
