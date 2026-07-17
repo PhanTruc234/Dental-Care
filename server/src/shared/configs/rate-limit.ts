@@ -1,5 +1,5 @@
 import { Request } from 'express';
-import rateLimit, { Options } from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator, Options } from 'express-rate-limit';
 // import RedisStore from 'rate-limit-redis'; // Bật lên khi deploy Production
 
 const commonConfig: Partial<Options> = {
@@ -31,13 +31,21 @@ export const createLimiter = rateLimit({
     message: { message: 'Quá nhiều request tạo tài nguyên, thử lại sau 1 phút' },
 });
 
+export const emailLimiter = rateLimit({
+    ...commonConfig,
+    windowMs: 60 * 60 * 1000,
+    max: 3,
+    message: { message: 'Bạn đã yêu cầu gửi email quá nhiều lần, thử lại sau 1 giờ' },
+});
+
 export const userActionLimiter = rateLimit({
     ...commonConfig,
     windowMs: 60 * 1000,
     max: 10,
     keyGenerator: (req: Request): string => {
         const userId = req.user?.id;
-        return userId?.toString() || req.ip || 'unknown-ip';
+        if (userId) return userId.toString();
+        return ipKeyGenerator(req.ip ?? "unknown-ip");
     },
     message: { message: 'Thao tác quá nhanh, vui lòng chờ' },
 });

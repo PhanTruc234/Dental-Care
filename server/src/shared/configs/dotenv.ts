@@ -22,7 +22,7 @@ export const env = {
     SMTP_FROM: process.env.SMTP_FROM || "",
     SUPPORT_EMAIL: process.env.SUPPORT_EMAIL || process.env.SMTP_USER || "",
     APP_NAME: process.env.APP_NAME || "DentalCare",
-    CLIENT_URL: process.env.CLIENT_URL || "http://localhost:5173,http://localhost:3000",
+    CLIENT_URL: process.env.CLIENT_URL || "http://localhost:5173",
     APP_URL: process.env.APP_URL || "http://localhost:5173",
     DATABASE_URL: process.env.DATABASE_URL,
 };
