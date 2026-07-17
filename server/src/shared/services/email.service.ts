@@ -1,8 +1,9 @@
 import nodemailer, { type Transporter } from "nodemailer";
 import { env } from "../configs/dotenv.js";
 import { logger } from "../configs/logger.js";
-import type { SendEmailOptions } from "../types/email.types.js";
+import type { NewDeviceLoginInfo, SendEmailOptions } from "../types/email.types.js";
 import {
+    newDeviceLoginEmail,
     passwordChangedEmail,
     resetPasswordEmail,
     verificationEmail,
@@ -69,3 +70,8 @@ export const sendResetPasswordEmail = async (email: string, token: string): Prom
 
 export const sendPasswordChangedEmail = async (email: string): Promise<void> =>
     sendEmail({ to: email, ...passwordChangedEmail() });
+
+export const sendNewDeviceLoginEmail = async (
+    email: string,
+    info: NewDeviceLoginInfo,
+): Promise<void> => sendEmail({ to: email, ...newDeviceLoginEmail(info) });

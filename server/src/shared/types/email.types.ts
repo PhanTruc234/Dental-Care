@@ -24,3 +24,9 @@ export interface EmailLayoutOptions {
     footnotes?: string[];
     alert?: string;
 }
+
+export interface NewDeviceLoginInfo {
+    userAgent: string;
+    ip: string;
+    time: Date;
+}

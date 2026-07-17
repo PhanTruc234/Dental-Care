@@ -1,6 +1,7 @@
 import { env } from "../../configs/dotenv.js";
-import type { EmailTemplate } from "../../types/email.types.js";
-import { BRAND, renderLayout, renderText } from "./layout.js";
+import type { EmailTemplate, NewDeviceLoginInfo } from "../../types/email.types.js";
+import { describeDevice } from "../../utils/user-agent.js";
+import { BRAND, escapeHtml, renderLayout, renderText } from "./layout.js";
 
 const buildUrl = (path: string, token: string): string =>
     `${env.CLIENT_URL}${path}?token=${encodeURIComponent(token)}`;
@@ -87,3 +88,37 @@ export const passwordChangedEmail = (): EmailTemplate => ({
         "Nếu bạn không thực hiện thay đổi này, hãy liên hệ bộ phận hỗ trợ ngay lập tức.",
     ]),
 });
+
+export const newDeviceLoginEmail = ({ userAgent, ip, time }: NewDeviceLoginInfo): EmailTemplate => {
+    const timeStr = time.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour12: false });
+    const deviceLabel = describeDevice(userAgent);
+    const secureUrl = `${env.CLIENT_URL}/forgot-password`;
+
+    return {
+        subject: `[${env.APP_NAME}] Đăng nhập từ thiết bị mới`,
+        html: renderLayout({
+            heading: "Đăng nhập từ thiết bị mới",
+            preheader: `Tài khoản ${env.APP_NAME} vừa được đăng nhập từ một thiết bị mới.`,
+            paragraphs: [
+                "Chúng tôi ghi nhận một lần đăng nhập từ thiết bị chưa từng sử dụng trước đây:",
+                `<strong>Thời gian:</strong> ${escapeHtml(timeStr)}<br>` +
+                `<strong>Địa chỉ IP:</strong> ${escapeHtml(ip)}<br>` +
+                `<strong>Thiết bị:</strong> ${escapeHtml(deviceLabel)}`,
+                "Nếu đây là bạn, bạn có thể bỏ qua email này.",
+            ],
+            button: { label: "Bảo mật tài khoản", url: secureUrl, color: BRAND.danger },
+            alert: "Nếu KHÔNG phải bạn, hãy đổi mật khẩu ngay để bảo vệ tài khoản.",
+        }),
+        text: renderText([
+            "Đăng nhập từ thiết bị mới",
+            "",
+            "Chúng tôi ghi nhận một lần đăng nhập từ thiết bị chưa từng sử dụng:",
+            `Thời gian: ${timeStr}`,
+            `Địa chỉ IP: ${ip}`,
+            `Thiết bị: ${deviceLabel}`,
+            "",
+            "Nếu KHÔNG phải bạn, hãy đổi mật khẩu ngay:",
+            secureUrl,
+        ]),
+    };
+};
