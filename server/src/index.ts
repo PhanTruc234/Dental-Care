@@ -1,11 +1,12 @@
 import app from "./app.js";
 import { env } from "./shared/configs/dotenv.js";
 import { logger } from "./shared/configs/logger.js";
+import { startTokenCleanupJob } from "./shared/jobs/token-cleanup.js";
 
 const server = app.listen(env.PORT, () => {
     logger.info(`Server listening on http://localhost:${env.PORT}`);
+    startTokenCleanupJob();
 });
-
 const shutdown = (signal: string) => {
     logger.info(`${signal} received, shutting down...`);
     server.close(async () => {
