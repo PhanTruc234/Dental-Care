@@ -24,6 +24,7 @@ enum Gender {
   MALE
   FEMALE
   OTHER
+  UNKNOWN
 }
 
 enum StaffStatus {
@@ -112,22 +113,27 @@ enum Shift {
 // ================= AUTH =================
 
 model User {
-  userId        String       @id @default(uuid()) @map("user_id") @db.Uuid
-  email         String       @unique @db.Text // lowercase ở service trước khi lưu
-  passwordHash  String?      @map("password_hash") @db.Text // null với user đăng nhập Google
-  authProvider  AuthProvider @default(LOCAL) @map("auth_provider")
-  providerId    String?      @map("provider_id") @db.Text // Google "sub" ID
-  emailVerified Boolean      @default(false) @map("email_verified")
-  role          Role
-  isActive      Boolean      @default(true) @map("is_active")
-  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deletedAt     DateTime?    @map("deleted_at") @db.Timestamptz(6)
+  userId                  String       @id @default(uuid()) @map("user_id") @db.Uuid
+  email                   String       @unique @db.Text // lowercase ở service trước khi lưu
+  passwordHash            String?      @map("password_hash") @db.Text // null với user đăng nhập Google
+  authProvider            AuthProvider @default(LOCAL) @map("auth_provider")
+  providerId              String?      @map("provider_id") @db.Text // Google "sub" ID
+  emailVerified           Boolean      @default(false) @map("email_verified")
+  emailVerifyTokenHash    String?      @unique @map("email_verify_token_hash") @db.Text
+  emailVerifyTokenExpires DateTime?    @map("email_verify_token_expires") @db.Timestamptz(6)
 
-  staff         Staff?
-  refreshTokens RefreshToken[]
-  auditLogs     AuditLog[]
-  patient       Patient?
+  passwordResetTokenHash    String?        @unique @map("password_reset_token_hash") @db.Text
+  passwordResetTokenExpires DateTime?      @map("password_reset_token_expires") @db.Timestamptz(6)
+  role                      Role
+  isActive                  Boolean        @default(true) @map("is_active")
+  createdAt                 DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt                 DateTime?      @map("deleted_at") @db.Timestamptz(6)
+  passwordChangedAt         DateTime?      @map("password_changed_at") @db.Timestamptz(6)
+  staff                     Staff?
+  refreshTokens             RefreshToken[]
+  auditLogs                 AuditLog[]
+  patient                   Patient?
 
   @@unique([authProvider, providerId], map: "uq_users_provider") // 1 tài khoản Google chỉ map 1 user
   @@index([role, isActive])
@@ -159,7 +165,7 @@ model Staff {
   employeeCode String    @unique @map("employee_code") // mã hiển thị: NV001
   citizenId    String?   @unique
   fullName     String    @map("full_name")
-  phone        String    @unique
+  phone        String?   @unique
   avatar       String?
   gender       Gender
   dob          DateTime? @db.Date
@@ -323,8 +329,8 @@ model Patient {
   userId      String?   @unique @map("user_id") @db.Uuid
   fullName    String    @map("full_name")
   citizenId   String?   @unique @map("citizen_id")
-  phone       String
-  gender      Gender
+  phone       String?
+  gender      Gender    @default(UNKNOWN)
   dob         DateTime? @db.Date
   address     String?
   allergy     String? // dị ứng thuốc - kiểm tra khi kê đơn
