@@ -1,5 +1,6 @@
 import { OAuth2Client } from "google-auth-library";
 import { AuthProvider, Role } from "../../generated/prisma/enums.js";
+import { Prisma } from "../../generated/prisma/client.js";
 import { env } from "../../shared/configs/dotenv.js";
 import { logger } from "../../shared/configs/logger.js";
 import { prisma } from "../../shared/configs/prisma.js";
@@ -7,13 +8,36 @@ import { sendNewDeviceLoginEmail, sendPasswordChangedEmail, sendResetPasswordEma
 import { BadRequestError, ConflictError, NotFoundError, UnauthorizedError } from "../../shared/utils/AppError.js";
 import { generateAccessToken, generateRandomToken, generateRefreshToken, hashToken, refreshTokenExpiry, verifyRefreshToken } from "../../shared/utils/token.js";
 import type { ChangePasswordBody, ForgotPasswordBody, GoogleLoginBody, LoginBody, RegisterBody, ResendVerificationBody, ResetPasswordBody, SessionIdParams, VerifyEmailQuery } from "./auth.schema.js";
-import { TokenPayload } from "../../shared/types/auth.types.js";
 import { expiresIn } from "../../shared/utils/time.js";
 import { comparePassword, hashPassword } from "../../shared/utils/password.js";
 import { describeDevice } from "../../shared/utils/user-agent.js";
+import { AuditAction, writeAudit } from "../../shared/services/audit.service.js";
+import type { RequestContext } from "../../shared/utils/request-context.js";
 type SessionContext = { userAgent?: string | null; ip?: string | null };
 const EMAIL_VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
+const MAX_PATIENT_CODE_RETRY = 5;
+const isPatientCodeConflict = (err: unknown) => {
+    if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== "P2002") {
+        return false;
+    }
+    const target = err.meta?.target;
+    const text = Array.isArray(target) ? target.join(",") : String(target ?? "");
+    return text.includes("patient_code");
+};
+
+const withPatientCodeRetry = async <T>(fn: () => Promise<T>): Promise<T> => {
+    for (let attempt = 0; attempt < MAX_PATIENT_CODE_RETRY; attempt++) {
+        try {
+            return await fn();
+        } catch (err) {
+            if (isPatientCodeConflict(err)) continue;
+            throw err;
+        }
+    }
+    throw new ConflictError("Không tạo được mã bệnh nhân, vui lòng thử lại");
+};
+
 const issueSession = async (
     user: { userId: string; email: string; role: Role },
     context: SessionContext = {},
@@ -57,7 +81,7 @@ const issueSession = async (
     return { accessToken, refreshToken, user: payload };
 };
 const googleClient = new OAuth2Client(env.GOOGLE_CLIENT_ID);
-export const register = async (data: RegisterBody) => {
+export const register = async (data: RegisterBody, context: RequestContext = {}) => {
     const { email, fullName, password, phone } = data
     const existing = await prisma.user.findUnique({
         where: { email },
@@ -68,28 +92,38 @@ export const register = async (data: RegisterBody) => {
     }
     const passwordHash = await hashPassword(password)
     const verifyToken = generateRandomToken();
-    const { user, patient } = await prisma.$transaction(async (tx) => {
-        const user = await tx.user.create({
-            data: {
-                email,
-                passwordHash,
-                emailVerifyTokenHash: hashToken(verifyToken),
-                emailVerifyTokenExpires: expiresIn(EMAIL_VERIFY_TTL_MS),
-                role: Role.PATIENT,
-            }
+    const { user, patient } = await withPatientCodeRetry(() =>
+        prisma.$transaction(async (tx) => {
+            const user = await tx.user.create({
+                data: {
+                    email,
+                    passwordHash,
+                    emailVerifyTokenHash: hashToken(verifyToken),
+                    emailVerifyTokenExpires: expiresIn(EMAIL_VERIFY_TTL_MS),
+                    role: Role.PATIENT,
+                }
+            })
+            const count = await tx.patient.count();
+            const patientCode = `BN${String(count + 1).padStart(6, "0")}`;
+            const patient = await tx.patient.create({
+                data: {
+                    patientCode,
+                    userId: user.userId,
+                    fullName,
+                    phone
+                },
+            });
+            return { user, patient };
         })
-        const count = await tx.patient.count();
-        const patientCode = `BN${String(count + 1).padStart(6, "0")}`;
-        const patient = await tx.patient.create({
-            data: {
-                patientCode,
-                userId: user.userId,
-                fullName,
-                phone
-            },
-        });
-        return { user, patient };
-    })
+    )
+    await writeAudit({
+        action: AuditAction.REGISTER,
+        entity: "User",
+        entityId: user.userId,
+        userId: user.userId,
+        newValue: { role: user.role, patientCode: patient.patientCode },
+        context,
+    });
     try {
         await sendVerificationEmail(user.email, verifyToken);
     } catch (err) {
@@ -139,38 +173,47 @@ export const resendVerification = async ({ email }: ResendVerificationBody) => {
             email
         }
     })
-    if (!user) {
-        throw new NotFoundError("Không tìm thấy tài khoản với email này");
-    }
-    if (user.emailVerified) {
-        throw new BadRequestError("Email đã được xác nhận");
-    }
-    const verifyToken = generateRandomToken();
-    await prisma.user.update({
-        where: {
-            userId: user.userId
-        },
-        data: {
-            emailVerifyTokenHash: hashToken(verifyToken),
-            emailVerifyTokenExpires: expiresIn(EMAIL_VERIFY_TTL_MS)
+    if (user && !user.emailVerified && user.isActive && !user.deletedAt) {
+        const verifyToken = generateRandomToken();
+        await prisma.user.update({
+            where: {
+                userId: user.userId
+            },
+            data: {
+                emailVerifyTokenHash: hashToken(verifyToken),
+                emailVerifyTokenExpires: expiresIn(EMAIL_VERIFY_TTL_MS)
+            }
+        })
+        try {
+            await sendVerificationEmail(user.email, verifyToken);
+        } catch (err) {
+            logger.error({ err, userId: user.userId }, "Gửi email xác thực thất bại");
         }
-    })
-    try {
-        await sendVerificationEmail(user.email, verifyToken);
-    } catch (err) {
-        logger.error({ err, userId: user.userId }, "Gửi email xác thực thất bại");
     }
     return {
-        message: "Email xác nhận đã được gửi lại",
+        message: "Nếu email tồn tại và chưa được xác thực, bạn sẽ nhận được email xác nhận",
     }
 }
-export const login = async (data: LoginBody, context: { userAgent?: string | null; ip?: string | null } = {}) => {
+export const login = async (data: LoginBody, context: RequestContext = {}) => {
     const { email, password } = data
+    // Ghi email đã thử để phát hiện dò tài khoản. KHÔNG ghi mật khẩu.
+    const auditFailure = (reason: string, userId?: string) =>
+        writeAudit({
+            action: AuditAction.LOGIN_FAILED,
+            entity: "User",
+            entityId: userId ?? null,
+            userId: userId ?? null,
+            newValue: { email, reason },
+            context,
+        });
+
     const user = await prisma.user.findUnique({ where: { email } })
     if (!user) {
+        await auditFailure("NO_ACCOUNT");
         throw new UnauthorizedError("Email hoặc mật khẩu không đúng");
     }
     if (!user.isActive || user.deletedAt) {
+        await auditFailure("INACTIVE", user.userId);
         throw new UnauthorizedError("Tài khoản đã bị vô hiệu hoá");
     }
     if (!user.passwordHash) {
@@ -180,14 +223,25 @@ export const login = async (data: LoginBody, context: { userAgent?: string | nul
     }
     const isMatch = await comparePassword(password, user.passwordHash);
     if (!isMatch) {
+        await auditFailure("WRONG_PASSWORD", user.userId);
         throw new UnauthorizedError("Email hoặc mật khẩu không đúng");
     }
     if (!user.emailVerified) {
+        await auditFailure("EMAIL_NOT_VERIFIED", user.userId);
         throw new UnauthorizedError("Vui lòng xác nhận email trước khi đăng nhập");
     }
-    return { message: "Đăng nhập thành công", ...(await issueSession(user, context)) };
+    const session = await issueSession(user, context);
+    await writeAudit({
+        action: AuditAction.LOGIN,
+        entity: "User",
+        entityId: user.userId,
+        userId: user.userId,
+        newValue: { provider: "LOCAL" },
+        context,
+    });
+    return { message: "Đăng nhập thành công", ...session };
 }
-export const googleLogin = async ({ idToken }: GoogleLoginBody, context: { userAgent?: string | null; ip?: string | null } = {}) => {
+export const googleLogin = async ({ idToken }: GoogleLoginBody, context: RequestContext = {}) => {
     const ticket = await googleClient.verifyIdToken({
         idToken,
         audience: env.GOOGLE_CLIENT_ID,
@@ -205,6 +259,9 @@ export const googleLogin = async ({ idToken }: GoogleLoginBody, context: { userA
         if (!user.isActive || user.deletedAt) {
             throw new UnauthorizedError("Tài khoản đã bị vô hiệu hoá");
         }
+        if (user.providerId && user.providerId !== googleId) {
+            throw new UnauthorizedError("Email này đã được liên kết với một tài khoản Google khác");
+        }
         if (!user.providerId) {
             user = await prisma.user.update({
                 where: { userId: user.userId },
@@ -212,29 +269,40 @@ export const googleLogin = async ({ idToken }: GoogleLoginBody, context: { userA
             });
         }
     } else {
-        user = await prisma.$transaction(async (tx) => {
-            const created = await tx.user.create({
-                data: {
-                    email,
-                    authProvider: AuthProvider.GOOGLE,
-                    providerId: googleId,
-                    emailVerified: true,
-                    role: Role.PATIENT,
-                },
-            });
-            const count = await tx.patient.count();
-            const patientCode = `BN${String(count + 1).padStart(6, "0")}`;
-            await tx.patient.create({
-                data: {
-                    patientCode,
-                    userId: created.userId,
-                    fullName: name ?? email,
-                },
-            });
-            return created;
-        });
+        user = await withPatientCodeRetry(() =>
+            prisma.$transaction(async (tx) => {
+                const created = await tx.user.create({
+                    data: {
+                        email,
+                        authProvider: AuthProvider.GOOGLE,
+                        providerId: googleId,
+                        emailVerified: true,
+                        role: Role.PATIENT,
+                    },
+                });
+                const count = await tx.patient.count();
+                const patientCode = `BN${String(count + 1).padStart(6, "0")}`;
+                await tx.patient.create({
+                    data: {
+                        patientCode,
+                        userId: created.userId,
+                        fullName: name ?? email,
+                    },
+                });
+                return created;
+            })
+        );
     }
-    return { message: "Đăng nhập Google thành công", ...(await issueSession(user, context)) };
+    const session = await issueSession(user, context);
+    await writeAudit({
+        action: AuditAction.LOGIN,
+        entity: "User",
+        entityId: user.userId,
+        userId: user.userId,
+        newValue: { provider: "GOOGLE" },
+        context,
+    });
+    return { message: "Đăng nhập Google thành công", ...session };
 }
 export const forgotPassword = async ({ email }: ForgotPasswordBody) => {
     const user = await prisma.user.findUnique({
@@ -259,7 +327,7 @@ export const forgotPassword = async ({ email }: ForgotPasswordBody) => {
         message: "Nếu email tồn tại, bạn sẽ nhận được link đặt lại mật khẩu"
     };
 }
-export const resetPassword = async ({ token, newPassword }: ResetPasswordBody) => {
+export const resetPassword = async ({ token, newPassword }: ResetPasswordBody, context: RequestContext = {}) => {
     const tokenHash = hashToken(token);
     const user = await prisma.user.findFirst({
         where: {
@@ -287,6 +355,13 @@ export const resetPassword = async ({ token, newPassword }: ResetPasswordBody) =
             data: { revokedAt: new Date() },
         }),
     ]);
+    await writeAudit({
+        action: AuditAction.PASSWORD_RESET,
+        entity: "User",
+        entityId: user.userId,
+        userId: user.userId,
+        context,
+    });
     try {
         await sendPasswordChangedEmail(user.email);
     } catch (err) {
@@ -294,7 +369,7 @@ export const resetPassword = async ({ token, newPassword }: ResetPasswordBody) =
     }
     return { message: "Đặt lại mật khẩu thành công" };
 };
-export const changePassword = async (userId: string, { newPassword, currentPassword }: ChangePasswordBody, context: { userAgent?: string | null; ip?: string | null } = {}) => {
+export const changePassword = async (userId: string, { newPassword, currentPassword }: ChangePasswordBody, context: RequestContext = {}) => {
     const user = await prisma.user.findUnique({ where: { userId } });
     if (!user) {
         throw new NotFoundError("Không tìm thấy người dùng");
@@ -305,6 +380,9 @@ export const changePassword = async (userId: string, { newPassword, currentPassw
     const isMatch = await comparePassword(currentPassword, user.passwordHash);
     if (!isMatch) {
         throw new UnauthorizedError("Mật khẩu hiện tại không đúng");
+    }
+    if (currentPassword === newPassword) {
+        throw new BadRequestError("Mật khẩu mới phải khác mật khẩu hiện tại");
     }
 
     const passwordHash = await hashPassword(newPassword);
@@ -328,6 +406,13 @@ export const changePassword = async (userId: string, { newPassword, currentPassw
         }),
     ]);
     const accessToken = generateAccessToken({ ...payload, sid: newSession.id });
+    await writeAudit({
+        action: AuditAction.PASSWORD_CHANGED,
+        entity: "User",
+        entityId: userId,
+        userId,
+        context,
+    });
     try {
         await sendPasswordChangedEmail(user.email);
     } catch (err) {
@@ -336,9 +421,9 @@ export const changePassword = async (userId: string, { newPassword, currentPassw
 
     return { message: "Đổi mật khẩu thành công", accessToken, refreshToken };
 };
-export const refreshSession = async (token: string) => {
+export const refreshSession = async (token: string, context: RequestContext = {}) => {
     try {
-        verifyRefreshToken(token) as TokenPayload;
+        verifyRefreshToken(token);
     } catch {
         throw new UnauthorizedError("Refresh token không hợp lệ hoặc đã hết hạn");
     }
@@ -352,9 +437,17 @@ export const refreshSession = async (token: string) => {
             data: { revokedAt: new Date() },
         });
         logger.warn({ userId: stored.userId }, "Phát hiện tái sử dụng refresh token — đã thu hồi toàn bộ phiên");
+        await writeAudit({
+            action: AuditAction.TOKEN_REUSE_DETECTED,
+            entity: "User",
+            entityId: stored.userId,
+            userId: stored.userId,
+            newValue: { revokedSessionId: stored.id },
+            context,
+        });
         throw new UnauthorizedError("Phát hiện tái sử dụng token, vui lòng đăng nhập lại");
     }
-    if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
+    if (!stored || stored.expiresAt < new Date()) {
         throw new UnauthorizedError("Refresh token không hợp lệ");
     }
     const user = await prisma.user.findUnique({ where: { userId: stored.userId } });
@@ -386,12 +479,25 @@ export const refreshSession = async (token: string) => {
         refreshToken: newRefreshToken
     };
 };
-export const logout = async (token: string | undefined) => {
+export const logout = async (token: string | undefined, context: RequestContext = {}) => {
     if (token) {
+        const stored = await prisma.refreshToken.findUnique({
+            where: { tokenHash: hashToken(token) },
+            select: { id: true, userId: true, revokedAt: true },
+        });
         await prisma.refreshToken.updateMany({
             where: { tokenHash: hashToken(token), revokedAt: null },
             data: { revokedAt: new Date() },
         });
+        if (stored && !stored.revokedAt) {
+            await writeAudit({
+                action: AuditAction.LOGOUT,
+                entity: "RefreshToken",
+                entityId: stored.id,
+                userId: stored.userId,
+                context,
+            });
+        }
     }
     return { message: "Đăng xuất thành công" };
 };
@@ -410,20 +516,35 @@ export const getSessions = async (userId: string, currentSid: string) => {
     }));
 };
 
-export const logoutAll = async (userId: string) => {
-    await prisma.refreshToken.updateMany({
+export const logoutAll = async (userId: string, context: RequestContext = {}) => {
+    const r = await prisma.refreshToken.updateMany({
         where: { userId, revokedAt: null },
         data: { revokedAt: new Date() },
+    });
+    await writeAudit({
+        action: AuditAction.LOGOUT_ALL,
+        entity: "User",
+        entityId: userId,
+        userId,
+        newValue: { revokedCount: r.count },
+        context,
     });
     return { message: "Đã đăng xuất khỏi mọi thiết bị" };
 };
 
-export const revokeSession = async (userId: string, { sessionId }: SessionIdParams) => {
+export const revokeSession = async (userId: string, { sessionId }: SessionIdParams, context: RequestContext = {}) => {
     const r = await prisma.refreshToken.updateMany({
         where: { id: sessionId, userId, revokedAt: null },   // userId chặn đá phiên người khác
         data: { revokedAt: new Date() },
     });
     if (r.count === 0) throw new NotFoundError("Không tìm thấy phiên");
+    await writeAudit({
+        action: AuditAction.SESSION_REVOKED,
+        entity: "RefreshToken",
+        entityId: sessionId,
+        userId,
+        context,
+    });
     return { message: "Đã đăng xuất thiết bị" };
 };
 export const getMe = async (userId: string) => {

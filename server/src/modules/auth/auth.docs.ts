@@ -12,7 +12,7 @@ const res = <T extends z.ZodTypeAny>(description: string, schema: T) => ({ descr
 const err = (description: string) => ({ description, ...json(ErrorResponse) });
 const secured = { security: [{ cookieAuth: [] }] };
 
-const rateLimited = { 429: err("Quá nhiều request (rate limit)") };
+const rateLimited = { 429: err("Quá nhiều yêu cầu") };
 const invalid = { 400: err("Dữ liệu không hợp lệ") };
 const unauth = { 401: err("Chưa đăng nhập hoặc phiên đã kết thúc") };
 
@@ -40,11 +40,10 @@ registry.registerPath({
 registry.registerPath({
     method: "post", path: "/api/v1/auth/resend-verification", tags: ["Auth"],
     summary: "Gửi lại email xác thực",
+    description: "Luôn trả về 200 với cùng một thông báo, kể cả khi email không tồn tại hoặc đã được xác thực — tránh để lộ email nào đã đăng ký.",
     request: { body: json(ResendVerificationBody) },
     responses: {
-        200: res("Đã gửi lại", MessageResponse),
-        404: err("Không tìm thấy tài khoản"),
-        400: err("Email đã được xác nhận"),
+        200: res("Đã tiếp nhận yêu cầu", MessageResponse),
         ...rateLimited,
     },
 });

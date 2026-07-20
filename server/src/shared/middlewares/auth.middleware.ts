@@ -1,7 +1,7 @@
 import { NextFunction, Request, Response } from "express";
 import { UnauthorizedError } from "../utils/AppError.js";
 import { verifyAccessToken } from "../utils/token.js";
-import { AccessTokenPayload, TokenPayload } from "../types/auth.types.js";
+import { AccessTokenPayload } from "../types/auth.types.js";
 import { prisma } from "../configs/prisma.js";
 
 export const verifyUser = async (req: Request, res: Response, next: NextFunction) => {

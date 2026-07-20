@@ -8,9 +8,10 @@ import type {
     RegisterBody, ResendVerificationBody, ResetPasswordBody, SessionIdParams, VerifyEmailQuery,
 } from "./auth.schema.js";
 import * as authService from "./auth.service.js";
+import { requestContext } from "../../shared/utils/request-context.js";
 export const register = handleAsync(
     async (req: Request<unknown, unknown, RegisterBody>, res: Response) => {
-        const { message, user } = await authService.register(req.body);
+        const { message, user } = await authService.register(req.body, requestContext(req));
         created(res, user, message);
     },
 );
@@ -31,10 +32,7 @@ export const resendVerification = handleAsync(
 
 export const login = handleAsync(
     async (req: Request<unknown, unknown, LoginBody>, res: Response) => {
-        const { message, accessToken, refreshToken, user } = await authService.login(req.body, {
-            userAgent: req.headers["user-agent"] ?? null,
-            ip: req.ip ?? null,
-        });
+        const { message, accessToken, refreshToken, user } = await authService.login(req.body, requestContext(req));
         setAuthCookies(res, accessToken, refreshToken);
         ok(res, { accessToken, user }, message);
     },
@@ -42,10 +40,7 @@ export const login = handleAsync(
 
 export const googleLogin = handleAsync(
     async (req: Request<unknown, unknown, GoogleLoginBody>, res: Response) => {
-        const { message, accessToken, refreshToken, user } = await authService.googleLogin(req.body, {
-            userAgent: req.headers["user-agent"] ?? null,
-            ip: req.ip ?? null,
-        });
+        const { message, accessToken, refreshToken, user } = await authService.googleLogin(req.body, requestContext(req));
         setAuthCookies(res, accessToken, refreshToken);
         ok(res, { accessToken, user }, message);
     },
@@ -59,7 +54,7 @@ export const forgotPassword = handleAsync(
 
 export const resetPassword = handleAsync(
     async (req: Request<unknown, unknown, ResetPasswordBody>, res: Response) => {
-        const { message } = await authService.resetPassword(req.body);
+        const { message } = await authService.resetPassword(req.body, requestContext(req));
         clearAuthCookies(res);
         ok(res, undefined, message);
     },
@@ -67,10 +62,7 @@ export const resetPassword = handleAsync(
 
 export const changePassword = handleAsync(
     async (req: Request<unknown, unknown, ChangePasswordBody>, res: Response) => {
-        const { message, accessToken, refreshToken } = await authService.changePassword(req.user!.id, req.body, {
-            userAgent: req.headers["user-agent"] ?? null,
-            ip: req.ip ?? null,
-        });
+        const { message, accessToken, refreshToken } = await authService.changePassword(req.user!.id, req.body, requestContext(req));
         setAuthCookies(res, accessToken, refreshToken);
 
         ok(res, { accessToken }, message);
@@ -82,7 +74,7 @@ export const refreshToken = handleAsync(async (req: Request, res: Response) => {
         throw new UnauthorizedError("Refresh token không tồn tại");
     }
     try {
-        const { message, accessToken, refreshToken: newRt } = await authService.refreshSession(token);
+        const { message, accessToken, refreshToken: newRt } = await authService.refreshSession(token, requestContext(req));
         setAuthCookies(res, accessToken, newRt);
         ok(res, { accessToken }, message);
     } catch (err) {
@@ -92,7 +84,7 @@ export const refreshToken = handleAsync(async (req: Request, res: Response) => {
 });
 
 export const logout = handleAsync(async (req: Request, res: Response) => {
-    const { message } = await authService.logout(req.cookies?.refreshToken as string | undefined);
+    const { message } = await authService.logout(req.cookies?.refreshToken as string | undefined, requestContext(req));
     clearAuthCookies(res);
     ok(res, undefined, message);
 });
@@ -103,14 +95,14 @@ export const getSessions = handleAsync(async (req: Request, res: Response) => {
 });
 
 export const logoutAll = handleAsync(async (req: Request, res: Response) => {
-    const { message } = await authService.logoutAll(req.user!.id);
+    const { message } = await authService.logoutAll(req.user!.id, requestContext(req));
     clearAuthCookies(res);
     ok(res, undefined, message);
 });
 
 export const revokeSession = handleAsync(
     async (req: Request<SessionIdParams>, res: Response) => {
-        const { message } = await authService.revokeSession(req.user!.id, req.params);
+        const { message } = await authService.revokeSession(req.user!.id, req.params, requestContext(req));
         ok(res, undefined, message);
     },
 );
