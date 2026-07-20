@@ -23,6 +23,13 @@ export const authLimiter = rateLimit({
     skipSuccessfulRequests: true,
     message: { message: 'Quá nhiều lần đăng nhập thất bại, thử lại sau 15 phút' },
 });
+export const refreshLimiter = rateLimit({
+    ...commonConfig,
+    windowMs: 15 * 60 * 1000,
+    max: 30,
+    skipSuccessfulRequests: true,
+    message: { message: 'Quá nhiều lần làm mới phiên thất bại, vui lòng đăng nhập lại' },
+});
 
 export const createLimiter = rateLimit({
     ...commonConfig,
