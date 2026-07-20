@@ -191,7 +191,6 @@ model Staff {
   appointmentsCreated   Appointment[]      @relation("AppointmentCreator")
   appointmentsCancelled Appointment[]      @relation("AppointmentCanceller")
   staffSchedules        StaffSchedule[]
-  appointments          Appointment[]
 
   @@index([fullName])
   @@map("staff")
@@ -666,8 +665,6 @@ model Appointment {
 
   treatmentRecord TreatmentRecord?
   schedule        StaffSchedule    @relation(fields: [scheduleId], references: [scheduleId])
-  staff           Staff?           @relation(fields: [staffStaffId], references: [staffId])
-  staffStaffId    String?          @db.Uuid
 
   @@index([scheduleId])
   @@index([dentistId, scheduledAt])
