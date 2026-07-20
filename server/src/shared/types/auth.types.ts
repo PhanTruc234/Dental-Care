@@ -1,12 +1,12 @@
 export type Role = "ADMIN" | "DENTIST" | "PATIENT" | "RECEPTIONIST" | "ASSISTANT";
 
-export interface TokenPayload {
+export type TokenPayload = {
     id: string;
     role: Role;
     email: string;
 }
 
-export interface AccessTokenPayload extends TokenPayload {
+export type AccessTokenPayload = {
     sid: string;
     iat: number;
-}
+} & TokenPayload

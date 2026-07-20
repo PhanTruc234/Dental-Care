@@ -1,22 +1,22 @@
 
-export interface EmailTemplate {
+export type EmailTemplate = {
     subject: string;
     html: string;
     text: string;
 }
 
-export interface SendEmailOptions extends EmailTemplate {
+export type SendEmailOptions = {
     to: string | string[];
     replyTo?: string;
-}
+} & EmailTemplate
 
-export interface EmailButton {
+export type EmailButton = {
     label: string;
     url: string;
     color?: string;
 }
 
-export interface EmailLayoutOptions {
+export type EmailLayoutOptions = {
     heading: string;
     preheader: string;
     paragraphs: string[];
@@ -25,7 +25,7 @@ export interface EmailLayoutOptions {
     alert?: string;
 }
 
-export interface NewDeviceLoginInfo {
+export type NewDeviceLoginInfo = {
     userAgent: string;
     ip: string;
     time: Date;

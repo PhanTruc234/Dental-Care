@@ -5,7 +5,7 @@ import { env } from "../configs/dotenv.js";
 const handleJWTError = () => new UnauthorizedError("Token không hợp lệ");
 const handleJWTExpired = () => new UnauthorizedError("Token đã hết hạn");
 
-interface ErrorResponse {
+type ErrorResponse = {
     status: "error";
     message: string;
     requestId?: string;
