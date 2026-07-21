@@ -25,4 +25,7 @@ export const env = {
     CLIENT_URL: process.env.CLIENT_URL || "http://localhost:5173",
     APP_URL: process.env.APP_URL || "http://localhost:5173",
     DATABASE_URL: process.env.DATABASE_URL,
+    SEED_ADMIN_EMAIL: process.env.SEED_ADMIN_EMAIL || "",
+    SEED_ADMIN_PASSWORD: process.env.SEED_ADMIN_PASSWORD || "",
+    SEED_ADMIN_NAME: process.env.SEED_ADMIN_NAME || "Quản trị viên",
 };

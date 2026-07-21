@@ -18,8 +18,14 @@ export const validate =
                 }
                 if (key === "body") {
                     req.body = result.data;
-                }
-                else {
+                } else if (key === "query") {
+                    Object.defineProperty(req, "query", {
+                        value: result.data,
+                        writable: true,
+                        configurable: true,
+                        enumerable: true,
+                    });
+                } else {
                     Object.assign(req[key], result.data);
                 }
             }
