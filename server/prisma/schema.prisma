@@ -197,10 +197,10 @@ model Staff {
 }
 
 model Specialty {
-  specialtyId String @id @default(uuid()) @map("specialty_id") @db.Uuid
-  name        String @unique
-
-  staffs StaffSpecialty[]
+  specialtyId String           @id @default(uuid()) @map("specialty_id") @db.Uuid
+  name        String           @unique
+  code        String           @unique
+  staffs      StaffSpecialty[]
 
   @@map("specialties")
 }
