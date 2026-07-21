@@ -1,6 +1,5 @@
 import { OAuth2Client } from "google-auth-library";
 import { AuthProvider, Role } from "../../generated/prisma/enums.js";
-import { Prisma } from "../../generated/prisma/client.js";
 import { env } from "../../shared/configs/dotenv.js";
 import { logger } from "../../shared/configs/logger.js";
 import { prisma } from "../../shared/configs/prisma.js";
@@ -13,31 +12,11 @@ import { comparePassword, hashPassword } from "../../shared/utils/password.js";
 import { describeDevice } from "../../shared/utils/user-agent.js";
 import { AuditAction, writeAudit } from "../../shared/services/audit.service.js";
 import type { RequestContext } from "../../shared/utils/request-context.js";
+import { withUniqueCodeRetry } from "../../shared/utils/unique-code.js";
+const PATIENT_CODE_CONFLICT = "Không tạo được mã bệnh nhân, vui lòng thử lại";
 type SessionContext = { userAgent?: string | null; ip?: string | null };
 const EMAIL_VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
-const MAX_PATIENT_CODE_RETRY = 5;
-const isPatientCodeConflict = (err: unknown) => {
-    if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== "P2002") {
-        return false;
-    }
-    const target = err.meta?.target;
-    const text = Array.isArray(target) ? target.join(",") : String(target ?? "");
-    return text.includes("patient_code");
-};
-
-const withPatientCodeRetry = async <T>(fn: () => Promise<T>): Promise<T> => {
-    for (let attempt = 0; attempt < MAX_PATIENT_CODE_RETRY; attempt++) {
-        try {
-            return await fn();
-        } catch (err) {
-            if (isPatientCodeConflict(err)) continue;
-            throw err;
-        }
-    }
-    throw new ConflictError("Không tạo được mã bệnh nhân, vui lòng thử lại");
-};
-
 const issueSession = async (
     user: { userId: string; email: string; role: Role },
     context: SessionContext = {},
@@ -92,7 +71,7 @@ export const register = async (data: RegisterBody, context: RequestContext = {})
     }
     const passwordHash = await hashPassword(password)
     const verifyToken = generateRandomToken();
-    const { user, patient } = await withPatientCodeRetry(() =>
+    const { user, patient } = await withUniqueCodeRetry("patient_code", PATIENT_CODE_CONFLICT, () =>
         prisma.$transaction(async (tx) => {
             const user = await tx.user.create({
                 data: {
@@ -269,7 +248,7 @@ export const googleLogin = async ({ idToken }: GoogleLoginBody, context: Request
             });
         }
     } else {
-        user = await withPatientCodeRetry(() =>
+        user = await withUniqueCodeRetry("patient_code", PATIENT_CODE_CONFLICT, () =>
             prisma.$transaction(async (tx) => {
                 const created = await tx.user.create({
                     data: {
