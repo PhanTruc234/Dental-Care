@@ -29,6 +29,22 @@ const nextSpecialtyCode = async (tx: Prisma.TransactionClient) => {
     const lastNumber = last ? Number(last.code.replace(/\D/g, "")) : 0;
     return `SP${String(lastNumber + 1).padStart(3, "0")}`;
 };
+const assertNameUnique = async (
+    client: Prisma.TransactionClient,
+    name: string,
+    excludeSpecialtyId?: string,
+) => {
+    const dup = await client.specialty.findFirst({
+        where: {
+            name: { equals: name.trim(), mode: "insensitive" },
+            ...(excludeSpecialtyId ? { specialtyId: { not: excludeSpecialtyId } } : {}),
+        },
+        select: { specialtyId: true },
+    });
+    if (dup) {
+        throw new ConflictError("Tên chuyên khoa đã tồn tại");
+    }
+};
 
 export const listSpecialties = async ({ search }: ListSpecialtiesQuery) => {
     const rows = await prisma.specialty.findMany({
@@ -47,16 +63,10 @@ export const listSpecialties = async ({ search }: ListSpecialtiesQuery) => {
 };
 
 export const createSpecialty = async ({ name }: CreateSpecialtyBody) => {
-    const existing = await prisma.specialty.findUnique({
-        where: { name },
-        select: { specialtyId: true },
-    });
-    if (existing) {
-        throw new ConflictError("Tên chuyên khoa đã tồn tại");
-    }
     return withUniqueCodeRetry("code", "Không tạo được mã chuyên khoa, vui lòng thử lại",
         async () => {
             const s = await prisma.$transaction(async (tx) => {
+                await assertNameUnique(tx, name);
                 const code = await nextSpecialtyCode(tx);
                 return tx.specialty.create({ data: { code, name }, select: selectSpecialty });
             });
@@ -77,13 +87,7 @@ export const updateSpecialty = async (
         throw new NotFoundError("Không tìm thấy chuyên khoa");
     }
 
-    const duplicate = await prisma.specialty.findFirst({
-        where: { name, specialtyId: { not: specialtyId } },
-        select: { specialtyId: true },
-    });
-    if (duplicate) {
-        throw new ConflictError("Tên chuyên khoa đã tồn tại");
-    }
+    await assertNameUnique(prisma, name, specialtyId);
     const s = await prisma.specialty.update({
         where: { specialtyId },
         data: { name },
