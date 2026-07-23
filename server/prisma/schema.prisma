@@ -407,7 +407,7 @@ model Medicine {
 
   createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
-  manufacturer      Manufacturer?      @relation(fields: [manufacturerId], references: [manufacturerId])
+  manufacturer      Manufacturer?      @relation(fields: [manufacturerId], references: [manufacturerId], onDelete: Restrict)
   batches           MedicineBatch[]
   prescriptions     Prescription[]
   invoiceItems      InvoiceItem[]
@@ -423,7 +423,7 @@ model Manufacturer {
 
   name     String  @unique
   country  String?
-  isActive Boolean @default(true)
+  isActive Boolean @default(true) @map("is_active")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
