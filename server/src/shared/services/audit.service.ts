@@ -16,6 +16,10 @@ export const AuditAction = {
     USER_ROLE_CHANGED: "USER_ROLE_CHANGED",
     STAFF_CREATED: "STAFF_CREATED",
     STAFF_UPDATED: "STAFF_UPDATED",
+    SERVICE_CREATED: "SERVICE_CREATED",
+    SERVICE_UPDATED: "SERVICE_UPDATED",
+    MEDICINE_CREATED: "MEDICINE_CREATED",
+    MEDICINE_UPDATED: "MEDICINE_UPDATED",
 } as const;
 
 export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
